@@ -1,0 +1,115 @@
+name: Render and publish release assets
+
+# =============================================================================
+# This workflow NEVER connects to a router. Read that again — it is the whole
+# point of the design.
+#
+# When you publish a GitHub Release, this job renders every .rsc listed in
+# deploy-manifest.json (injecting secrets via scripts/render.sh) and attaches
+# the results as release assets. That is the end of CI's involvement.
+#
+# The router, wherever it is, polls api.github.com hourly, notices the new tag,
+# downloads these assets and imports them itself. No inbound access, no
+# port-forward, no VPN, no runner on your network, no SSH key in CI that can
+# reach production.
+#
+# TRIGGER: publishing a Release. Pushes to main deploy NOTHING. That separation
+# is deliberate: `main` is where you edit, a Release is where you decide.
+#
+# SECRETS: listed in secrets.map, set with `gh secret set <NAME>`.
+#   The names below must match column 2 of secrets.map.
+# =============================================================================
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to re-render assets for"
+        required: true
+
+permissions:
+  contents: write   # required to upload assets onto the release
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # ======================================================================
+      # STOP. READ THIS BEFORE DISABLING THIS STEP.
+      #
+      # Release assets are rendered WITH YOUR REAL SECRETS in cleartext — the
+      # GitHub PAT, your log tokens, and whatever else you add. On a PUBLIC
+      # repository, release assets are downloadable by anyone, with no auth.
+      # Publishing a release from a public repo therefore publishes your
+      # credentials to the internet.
+      #
+      # The routeros-gitops TEMPLATE is public. YOUR DEPLOYMENT REPO MUST BE
+      # PRIVATE. This step enforces that, and it is not optional.
+      # ======================================================================
+      - name: Refuse to publish secrets from a public repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          vis=$(gh repo view "${{ github.repository }}" --json visibility -q .visibility)
+          echo "Repository visibility: $vis"
+          if [ "$vis" != "PRIVATE" ] && [ "$vis" != "INTERNAL" ]; then
+            echo "::error::This repository is $vis. Release assets are rendered with real secrets in cleartext and would be world-readable. Make this repository private before publishing a release." >&2
+            exit 1
+          fi
+
+      - name: Render .rsc files into release assets
+        env:
+          # GITHUB_REPO would be stripped: Actions reserves the GITHUB_ env
+          # prefix. Hence the GITOPS_ prefix on every variable here.
+          GITOPS_GITHUB_REPO: ${{ github.repository }}
+          GITOPS_GITHUB_PAT: ${{ secrets.GITOPS_GITHUB_PAT }}
+          GITOPS_LOG_INGEST_URL: ${{ secrets.GITOPS_LOG_INGEST_URL }}
+          GITOPS_LOG_INGEST_TOKEN: ${{ secrets.GITOPS_LOG_INGEST_TOKEN }}
+          GITOPS_DEADMAN_URL: ${{ secrets.GITOPS_DEADMAN_URL }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+
+          # Render every entry in the manifest. The manifest is the source of
+          # truth for WHAT ships and in WHAT ORDER — the router replays it
+          # verbatim. Nothing outside it reaches the device.
+          jq -c '.[]' deploy-manifest.json | while read -r entry; do
+            path=$(echo "$entry" | jq -r '.path')
+            asset=$(echo "$entry" | jq -r '.asset')
+            ./scripts/render.sh "$path" "dist/$asset"
+          done
+
+          # The manifest travels with the release. The router fetches this
+          # first, so a release always applies ITS OWN order, not whatever the
+          # router happened to see last time.
+          cp deploy-manifest.json dist/deploy-manifest.json
+
+          # Refuse to ship an asset that still contains a required placeholder.
+          ./scripts/render.sh --check dist
+
+      - name: Upload rendered assets to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release upload "$TAG" dist/* --clobber --repo "${{ github.repository }}"
+
+      - name: Summary
+        if: always()
+        env:
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          {
+            echo "## Release \`$TAG\` rendered"
+            echo ""
+            echo "Assets uploaded. Every router polling this repo will detect the"
+            echo "new tag and self-apply within the hour."
+            echo ""
+            echo "To watch it land, see \`docs/04-operations.md\`."
+          } >> "$GITHUB_STEP_SUMMARY"

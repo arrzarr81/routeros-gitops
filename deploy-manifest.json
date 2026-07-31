@@ -1,0 +1,11 @@
+[
+  { "action": "import", "path": "engine/00-observability.rsc",      "asset": "engine__00-observability.rsc",      "dst": "engine__00-observability.rsc" },
+  { "action": "import", "path": "engine/01-pre-deploy-snapshot.rsc", "asset": "engine__01-pre-deploy-snapshot.rsc", "dst": "engine__01-pre-deploy-snapshot.rsc" },
+  { "action": "import", "path": "engine/02-watchdog.rsc",            "asset": "engine__02-watchdog.rsc",            "dst": "engine__02-watchdog.rsc" },
+
+  { "action": "import", "path": "config/10-network.rsc",             "asset": "config__10-network.rsc",             "dst": "config__10-network.rsc" },
+  { "action": "import", "path": "config/20-maintenance.rsc",         "asset": "config__20-maintenance.rsc",         "dst": "config__20-maintenance.rsc" },
+  { "action": "import", "path": "config/30-backup.rsc",              "asset": "config__30-backup.rsc",              "dst": "config__30-backup.rsc" },
+
+  { "action": "import", "path": "engine/99-self-update.rsc",         "asset": "engine__99-self-update.rsc",         "dst": "engine__99-self-update.rsc", "self": true }
+]

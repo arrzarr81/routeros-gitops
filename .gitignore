@@ -1,0 +1,29 @@
+# Local credentials — never commit
+scripts/.env
+.env
+*.env
+!scripts/.env.example
+
+# Rendered output: these contain real secrets in cleartext
+dist/
+*.rendered.rsc
+
+# Router artifacts
+*.backup
+*.rif
+autosupout.rif
+local-backups/
+
+# SSH keys, in case one is ever generated in-tree
+id_*
+*.pem
+*_rsa
+*_ed25519
+*.pub
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
