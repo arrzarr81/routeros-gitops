@@ -276,6 +276,7 @@ work on the oldest RouterOS you run.
 | **[04 — Operations](docs/04-operations.md)** | Ship, roll back, force a pull, recover a half-applied deploy |
 | **[05 — Troubleshooting](docs/05-troubleshooting.md)** | Symptom → cause → fix |
 | **[06 — RouterOS gotchas](docs/06-routeros-gotchas.md)** | Scripting traps that cost real downtime |
+| **[07 — Remote AP upgrade](docs/07-ap-upgrade.md)** | Optional: router upgrades a CAPsMAN AP RouterOS 6 → 7 over SSH, one AP per release |
 | **[08 — Telemetry module](docs/08-telemetry.md)** | Optional WiFi/CAP/LTE dashboard data: enabling it, detection, field list |
 
 ## Is this for you?
