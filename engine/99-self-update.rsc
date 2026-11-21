@@ -35,7 +35,8 @@
 #      confirmed-good backup (flash/ when present, newest 2 kept), ship an event.
 #
 # BACKUPS GO TO flash/ ON DEVICES THAT HAVE IT — the root there is RAM, wiped
-#   on reboot. Rollback picks the newest pre-deploy-* by embedded date-time.
+#   on reboot. Rollback picks the newest pre-deploy-* by numeric key (all
+#   digits of the name; RouterOS cannot compare strings with < >).
 #
 # THE SELF-IMPORT PROBLEM
 #   This script cannot import the file that defines it — /import would remove
@@ -184,8 +185,10 @@ add name=script_SELF_UPDATE owner=admin dont-require-permissions=no policy=ftp,r
     \n      :local n [:len \$bks]\
     \n      :if (\$n > 0) do={\
     \n        :local f [/file get (\$bks->(\$n - 1)) name]\
-    \n        # newest by embedded date-time; on-error keeps the find-order pick\
-    \n        :do { :foreach b in=\$bks do={ :local bn [/file get \$b name]; :if ([:pick \$bn [:find \$bn \"pre-deploy-\"] [:len \$bn]] > [:pick \$f [:find \$f \"pre-deploy-\"] [:len \$f]]) do={ :set f \$bn } } } on-error={}\
+    \n        # numeric key = all digits of the name (RouterOS cannot compare strings with < >)\
+    \n        :local fkey do={ :local d \"\"; :for i from=0 to=([:len \$1] - 1) do={ :local c [:pick \$1 \$i (\$i + 1)]; :if (\$c~\"[0-9]\") do={ :set d (\$d . \$c) } }; :return [:tonum \$d] }\
+    \n        # newest = max key; on-error keeps the find-order pick\
+    \n        :do { :local bestKey [\$fkey \$f]; :foreach b in=\$bks do={ :local bn [/file get \$b name]; :local k [\$fkey \$bn]; :if (\$k > \$bestKey) do={ :set f \$bn; :set bestKey \$k } } } on-error={}\
     \n        :local bname [:pick \$f 0 ([:len \$f] - 7)]\
     \n        /file remove [find name=\"flash/rollback-marker\"]\
     \n        /file add name=flash/rollback-marker type=file contents=(\"backup=\" . \$bname . \" reason=selfupdate\")\
@@ -203,16 +206,19 @@ add name=script_SELF_UPDATE owner=admin dont-require-permissions=no policy=ftp,r
     \n        # flash/ when present: the root is RAM there and is wiped on reboot\
     \n        :local bkDir \"\"\
     \n        :if ([:len [/file find where name=\"flash\"]] > 0) do={ :set bkDir \"flash/\" }\
-    \n        :do { /system backup save name=(\$bkDir . \"confirmed-good-\" . \$cgSafe) dont-encrypt=yes } on-error={}\
+    \n        # HHMM too, so keys compare with the watchdog's confirmed-good-<date>-HHMM\
+    \n        :local cgT [/system clock get time]\
+    \n        :do { /system backup save name=(\$bkDir . \"confirmed-good-\" . \$cgSafe . \"-\" . [:pick \$cgT 0 2] . [:pick \$cgT 3 5]) dont-encrypt=yes } on-error={}\
     \n        :delay 3s\
     \n        # keep the 2 newest confirmed-good (~67 KB each, ~2 MB free flash on small units)\
+    \n        # numeric key = all digits of the name (RouterOS cannot compare strings with < >)\
+    \n        :local fkey do={ :local d \"\"; :for i from=0 to=([:len \$1] - 1) do={ :local c [:pick \$1 \$i (\$i + 1)]; :if (\$c~\"[0-9]\") do={ :set d (\$d . \$c) } }; :return [:tonum \$d] }\
     \n        :local goods [/file find where name~\"confirmed-good-\"]\
     \n        :do {\
     \n          :while ([:len \$goods] > 2) do={\
     \n            :local oldest (\$goods->0)\
-    \n            :local oldKey [/file get \$oldest name]\
-    \n            :set oldKey [:pick \$oldKey [:find \$oldKey \"confirmed-good-\"] [:len \$oldKey]]\
-    \n            :foreach g in=\$goods do={ :local gn [/file get \$g name]; :set gn [:pick \$gn [:find \$gn \"confirmed-good-\"] [:len \$gn]]; :if (\$gn < \$oldKey) do={ :set oldest \$g; :set oldKey \$gn } }\
+    \n            :local oldKey [\$fkey [/file get \$oldest name]]\
+    \n            :foreach g in=\$goods do={ :local k [\$fkey [/file get \$g name]]; :if (\$k < \$oldKey) do={ :set oldest \$g; :set oldKey \$k } }\
     \n            /file remove \$oldest\
     \n            :set goods [/file find where name~\"confirmed-good-\"]\
     \n          }\

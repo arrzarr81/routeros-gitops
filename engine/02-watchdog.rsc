@@ -32,7 +32,8 @@
 #   pre-deploy-* (from 01) and confirmed-good-* (saved here on success) live in
 #   flash/ when the device has one: the root there is RAM and would be empty
 #   by the time this boot-time script looks for a rollback target. Target =
-#   newest pre-deploy name. confirmed-good retention: newest 2.
+#   newest pre-deploy by numeric key (all digits of the name — RouterOS can't
+#   compare strings with < >). confirmed-good retention: newest 2.
 #
 # WHY PING AND NOT /ping-the-script-way
 #   /ping inside a script returns 0 in some RouterOS builds regardless of
@@ -83,6 +84,10 @@ add name=script_WATCHDOG \
     \n:global logMessage \"Watchdog armed - deploy flag detected, monitoring WAN for 5 minutes\"\
     \n:do { /system script run script_LOG_EVENT } on-error={}\
     \n\
+    \n# fkey: numeric sort key = all digits of a file name, e.g.\
+    \n# flash/pre-deploy-2026-11-21-0300.backup -> 202611210300. RouterOS cannot\
+    \n# compare strings with < or > (\"cannot compare if string is less than string\"), numbers it can.\
+    \n:local fkey do={ :local d \"\"; :for i from=0 to=([:len \$1] - 1) do={ :local c [:pick \$1 \$i (\$i + 1)]; :if (\$c~\"[0-9]\") do={ :set d (\$d . \$c) } }; :return [:tonum \$d] }\
     \n# Identify the rollback target now, while we still can.\
     \n:local allBackups [/file find where name~\"pre-deploy-\"]\
     \n:local backupCount [:len \$allBackups]\
@@ -91,13 +96,14 @@ add name=script_WATCHDOG \
     \n  :log error \"Watchdog: no pre-deploy backup found - rollback impossible. Monitoring anyway.\"\
     \n} else={\
     \n  :local latestFile [/file get (\$allBackups->(\$backupCount - 1)) name]\
-    \n  # Names embed ISO date-time: take the greatest name from \"pre-deploy-\" on,\
-    \n  # so flash/ and root files compare fairly. on-error keeps the find-order\
-    \n  # pick, so a comparison quirk can never cost us the rollback target.\
+    \n  # Newest = max fkey (ISO date-time digits; flash/ and root alike). on-error\
+    \n  # keeps the find-order pick, so a quirk can never cost us the target.\
     \n  :do {\
+    \n    :local bestKey [\$fkey \$latestFile]\
     \n    :foreach b in=\$allBackups do={\
     \n      :local bn [/file get \$b name]\
-    \n      :if ([:pick \$bn [:find \$bn \"pre-deploy-\"] [:len \$bn]] > [:pick \$latestFile [:find \$latestFile \"pre-deploy-\"] [:len \$latestFile]]) do={ :set latestFile \$bn }\
+    \n      :local k [\$fkey \$bn]\
+    \n      :if (\$k > \$bestKey) do={ :set latestFile \$bn; :set bestKey \$k }\
     \n    }\
     \n  } on-error={}\
     \n  # strip the 7-char \".backup\" extension\
@@ -182,12 +188,10 @@ add name=script_WATCHDOG \
     \n:do {\
     \n  :while ([:len \$goods] > 2) do={\
     \n    :local oldest (\$goods->0)\
-    \n    :local oldKey [/file get \$oldest name]\
-    \n    :set oldKey [:pick \$oldKey [:find \$oldKey \"confirmed-good-\"] [:len \$oldKey]]\
+    \n    :local oldKey [\$fkey [/file get \$oldest name]]\
     \n    :foreach g in=\$goods do={\
-    \n      :local gn [/file get \$g name]\
-    \n      :set gn [:pick \$gn [:find \$gn \"confirmed-good-\"] [:len \$gn]]\
-    \n      :if (\$gn < \$oldKey) do={ :set oldest \$g; :set oldKey \$gn }\
+    \n      :local k [\$fkey [/file get \$g name]]\
+    \n      :if (\$k < \$oldKey) do={ :set oldest \$g; :set oldKey \$k }\
     \n    }\
     \n    :log info (\"Watchdog: pruning old \" . [/file get \$oldest name])\
     \n    /file remove \$oldest\

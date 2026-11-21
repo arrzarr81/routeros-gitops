@@ -21,7 +21,7 @@
 #   [flash/]pre-deploy-<date>-HHMM   e.g. flash/pre-deploy-2026-07-19-0750
 #   The "pre-deploy-" prefix is load-bearing: the watchdog and the self-update
 #   rollback path both find the restore target with [/file find where
-#   name~"pre-deploy-"] and take the NEWEST name (ISO date-time embedded).
+#   name~"pre-deploy-"] and take the NEWEST by numeric key (digits of the name).
 #   Don't rename it.
 #
 # WHERE: flash/ when the device has a flash directory. On such devices the
@@ -31,7 +31,7 @@
 # dont-encrypt=yes so the backup is loadable without a password — a rollback
 # that prompts for a passphrase is not a rollback.
 #
-# RETENTION: keeps the 3 most recent. Flash on small units is genuinely tight
+# RETENTION: keeps the 3 most recent (by numeric key, not /file find order). Flash on small units is genuinely tight
 # and a full disk breaks backup saves, which breaks rollback, which is the one
 # thing that must never break.
 # =============================================================================
@@ -62,21 +62,27 @@ add name=script_PRE_DEPLOY_SNAPSHOT \
     \n/system backup save name=\$snapshotName dont-encrypt=yes\
     \n:delay 3s\
     \n:log info (\"Snapshot saved: \" . \$snapshotName . \".backup\")\
-    \n# /file find sort order is not guaranteed to be chronological, but it is\
-    \n# stable insertion order in practice; prune from the START of the list.\
+    \n# fkey: numeric sort key = all digits of a file name, e.g.\
+    \n# flash/pre-deploy-2026-11-21-0300.backup -> 202611210300. RouterOS cannot\
+    \n# compare strings with < or > (\"cannot compare if string is less than string\"), numbers it can.\
+    \n:local fkey do={ :local d \"\"; :for i from=0 to=([:len \$1] - 1) do={ :local c [:pick \$1 \$i (\$i + 1)]; :if (\$c~\"[0-9]\") do={ :set d (\$d . \$c) } }; :return [:tonum \$d] }\
+    \n# Prune the OLDEST by key (not /file find order) until maxKeep remain.\
     \n:local allBackups [/file find where name~\"pre-deploy-\"]\
-    \n:local count [:len \$allBackups]\
     \n:local maxKeep 3\
-    \n:log info (\"Found \" . \$count . \" pre-deploy backup(s). Keeping \" . \$maxKeep . \" most recent.\")\
-    \n:if (\$count > \$maxKeep) do={\
-    \n  :local toDelete (\$count - \$maxKeep)\
-    \n  :local j 0\
-    \n  :while (\$j < \$toDelete) do={\
-    \n    :log info (\"Pruning old snapshot: \" . [/file get (\$allBackups->\$j) name])\
-    \n    /file remove (\$allBackups->\$j)\
-    \n    :set j (\$j + 1)\
+    \n:log info (\"Found \" . [:len \$allBackups] . \" pre-deploy backup(s). Keeping \" . \$maxKeep . \" most recent.\")\
+    \n:do {\
+    \n  :while ([:len \$allBackups] > \$maxKeep) do={\
+    \n    :local oldest (\$allBackups->0)\
+    \n    :local oldKey [\$fkey [/file get \$oldest name]]\
+    \n    :foreach b in=\$allBackups do={\
+    \n      :local k [\$fkey [/file get \$b name]]\
+    \n      :if (\$k < \$oldKey) do={ :set oldest \$b; :set oldKey \$k }\
+    \n    }\
+    \n    :log info (\"Pruning old snapshot: \" . [/file get \$oldest name])\
+    \n    /file remove \$oldest\
+    \n    :set allBackups [/file find where name~\"pre-deploy-\"]\
     \n  }\
-    \n}\
+    \n} on-error={ :log warning \"Pre-deploy retention failed\" }\
     \n:log info \"Pre-deploy snapshot complete.\""
 
 :log info "script_PRE_DEPLOY_SNAPSHOT installed. Invoke with: /system script run script_PRE_DEPLOY_SNAPSHOT"
