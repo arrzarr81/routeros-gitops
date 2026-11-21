@@ -7,8 +7,8 @@
 #   script_LOG_EVENT      POSTs one structured JSON event to your log sink.
 #   script_HEARTBEAT      POSTs router vitals as JSON every minute.
 #   script_DEADMAN_PING   POSTs plain-text vitals to a dead-man's-switch URL.
-#   schedule_HEARTBEAT    every 1m -> script_HEARTBEAT
-#   schedule_DEADMAN      every 1m -> script_DEADMAN_PING
+#   schedule_HEARTBEAT    every 1m -> script_HEARTBEAT     (only if log sink set)
+#   schedule_DEADMAN      every 1m -> script_DEADMAN_PING  (only if deadman URL set)
 #   plus rolling on-disk logging of warning/error/critical.
 #
 # WHY A DEAD-MAN'S SWITCH
@@ -32,10 +32,10 @@
 #   PLACEHOLDER_LOG_INGEST_TOKEN   bearer token for that endpoint
 #   PLACEHOLDER_DEADMAN_URL        e.g. https://hc-ping.com/<uuid>
 #
-#   All three are OPTIONAL. If a placeholder is left unsubstituted, the script
-#   detects the literal "PLACEHOLDER_" prefix and exits quietly instead of
-#   spamming the log with failed fetches. You can run this whole system with no
-#   monitoring at all and add it later.
+#   All three are OPTIONAL. If a placeholder is left unsubstituted, its
+#   scheduler is not installed at all, and a manual run stops at once with
+#   "... not configured" instead of attempting a fetch. You can run this whole
+#   system with no monitoring at all and add it later (re-import this file).
 #
 # EVENT ID CONVENTION
 #   <subsystem>_<what_happened>, past tense or state:
@@ -124,6 +124,9 @@ add name=script_HEARTBEAT \
     \n    :if ([:len \$activeWan] = 0) do={ :set activeWan [:tostr [/ip route get \$best gateway]] }\
     \n    :local pct [:find \$wanGw \"%\"]\
     \n    :if ([:typeof \$pct] = \"num\") do={ :set wanIf [:pick \$wanGw (\$pct + 1) [:len \$wanGw]]; :set wanGw [:pick \$wanGw 0 \$pct] }\
+    \n    # Interface gateway (LTE in modem mode, PPPoE): immediate-gw is the bare\
+    \n    # interface name with no %, so report it as the interface too.\
+    \n    :if (([:len \$wanIf] = 0) && ([:typeof [:toip \$wanGw]] != \"ip\")) do={ :set wanIf \$wanGw }\
     \n  }\
     \n} on-error={}\
     \n:local rosVersion [/system resource get version]\
@@ -166,10 +169,14 @@ add name=script_DEADMAN_PING \
 # next reboot; it only looked fine while a nightly reboot woke it every day.
 # On a router that reboots only for updates, heartbeat would go silent after
 # every deploy. Offsets also keep the two away from :00 and from each other.
-add name=schedule_HEARTBEAT interval=1m start-time=00:00:20 \
-    on-event="/system script run script_HEARTBEAT" policy=read,test
-add name=schedule_DEADMAN interval=1m start-time=00:00:40 \
-    on-event="/system script run script_DEADMAN_PING" policy=read,test
+#
+# Each scheduler is added only when its sink is configured. An unconfigured
+# script ends in :error, and a scheduler running it every minute writes
+# "script,error" twice a minute — which the disklog below copies to flash,
+# rotating real evidence out of the 2x2000-line buffer within minutes.
+# (Literal check at import time: render.sh substitutes this line too.)
+:if (!("PLACEHOLDER_LOG_INGEST_URL" ~ "^PLACEHOLDER_")) do={ /system scheduler add name=schedule_HEARTBEAT interval=1m start-time=00:00:20 on-event="/system script run script_HEARTBEAT" policy=read,test }
+:if (!("PLACEHOLDER_DEADMAN_URL" ~ "^PLACEHOLDER_")) do={ /system scheduler add name=schedule_DEADMAN interval=1m start-time=00:00:40 on-event="/system script run script_DEADMAN_PING" policy=read,test }
 
 # --- Persistent on-disk logging ----------------------------------------------
 # RouterOS keeps logs in RAM by default: a reboot erases exactly the evidence
