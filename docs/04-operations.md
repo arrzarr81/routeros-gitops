@@ -166,7 +166,7 @@ re-run destructive cleanup modules for no reason.
 
    ```routeros
    /import verbose=no file-name=config__10-network.rsc
-   /import verbose=no file-name=config__20-maintenance.rsc
+   /import verbose=no file-name=config__30-backup.rsc
    ```
 
 3. Finish what the interrupted script would have done:

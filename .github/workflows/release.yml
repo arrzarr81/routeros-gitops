@@ -16,8 +16,15 @@ name: Render and publish release assets
 # TRIGGER: publishing a Release. Pushes to main deploy NOTHING. That separation
 # is deliberate: `main` is where you edit, a Release is where you decide.
 #
-# SECRETS: listed in secrets.map, set with `gh secret set <NAME>`.
-#   The names below must match column 2 of secrets.map.
+# SECRETS: listed in secrets.map (engine + site), set with `gh secret set <NAME>`
+#   using the names from column 2. All repo secrets and variables are handed to
+#   render.sh as JSON, so adding a secret never requires editing this file.
+#
+# TWO LAYOUTS, ONE FILE
+#   * template mode: this repo itself is the site (engine/ + config/ here).
+#   * per-router repo: routeros-gitops is a git submodule at gitops/ and this
+#     file is copied to the router repo unchanged. Engine updates arrive by
+#     bumping the submodule, i.e. as a deliberate commit + release.
 # =============================================================================
 
 on:
@@ -37,6 +44,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive   # per-router repo: engine lives in gitops/
 
       # ======================================================================
       # STOP. READ THIS BEFORE DISABLING THIS STEP.
@@ -65,32 +74,19 @@ jobs:
       - name: Render .rsc files into release assets
         env:
           # GITHUB_REPO would be stripped: Actions reserves the GITHUB_ env
-          # prefix. Hence the GITOPS_ prefix on every variable here.
+          # prefix. Hence the GITOPS_ prefix.
           GITOPS_GITHUB_REPO: ${{ github.repository }}
-          GITOPS_GITHUB_PAT: ${{ secrets.GITOPS_GITHUB_PAT }}
-          GITOPS_LOG_INGEST_URL: ${{ secrets.GITOPS_LOG_INGEST_URL }}
-          GITOPS_LOG_INGEST_TOKEN: ${{ secrets.GITOPS_LOG_INGEST_TOKEN }}
-          GITOPS_DEADMAN_URL: ${{ secrets.GITOPS_DEADMAN_URL }}
+          # Every secret / variable, by name. render.sh picks the ones listed in
+          # secrets.map; nothing else is used or printed.
+          GITOPS_SECRETS_JSON: ${{ toJSON(secrets) }}
+          GITOPS_VARS_JSON: ${{ toJSON(vars) }}
         run: |
           set -euo pipefail
-          mkdir -p dist
-
-          # Render every entry in the manifest. The manifest is the source of
-          # truth for WHAT ships and in WHAT ORDER — the router replays it
-          # verbatim. Nothing outside it reaches the device.
-          jq -c '.[]' deploy-manifest.json | while read -r entry; do
-            path=$(echo "$entry" | jq -r '.path')
-            asset=$(echo "$entry" | jq -r '.asset')
-            ./scripts/render.sh "$path" "dist/$asset"
-          done
-
-          # The manifest travels with the release. The router fetches this
-          # first, so a release always applies ITS OWN order, not whatever the
-          # router happened to see last time.
-          cp deploy-manifest.json dist/deploy-manifest.json
-
-          # Refuse to ship an asset that still contains a required placeholder.
-          ./scripts/render.sh --check dist
+          if [ -x gitops/scripts/build-release.sh ]; then
+            gitops/scripts/build-release.sh dist     # per-router repo
+          else
+            scripts/build-release.sh dist            # template mode
+          fi
 
       - name: Upload rendered assets to the release
         env:

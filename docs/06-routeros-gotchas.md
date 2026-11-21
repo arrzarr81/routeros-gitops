@@ -44,7 +44,7 @@ add name=script_X \
 ...except it does work for `/system script add` in practice, and does *not*
 work inside a value. The reliable rule: **script bodies must be one physical
 line.** Use `\r\n` inside the source string for on-device readability, as
-`config/20-maintenance.rsc` does. Where you see continuations in this repo
+`engine/10-maintenance.rsc` does. Where you see continuations in this repo
 (`engine/*.rsc`), they are inside a `source="..."` string that RouterOS joins —
 a different construct, and one that has been tested on hardware.
 

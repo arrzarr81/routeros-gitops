@@ -106,6 +106,26 @@ add name=script_HEARTBEAT \
     \n:local totalHdd [/system resource get total-hdd-space]\
     \n:local cpuLoad [/system resource get cpu-load]\
     \n:local wanRoutes [/ip route print count-only where active=yes dst-address=0.0.0.0/0]\
+    \n# Which uplink carries traffic right now: the active default route with the\
+    \n# lowest distance. active_wan = its comment (e.g. FIBER / LTE), else gateway.\
+    \n:local activeWan \"\"\
+    \n:local wanGw \"\"\
+    \n:local wanIf \"\"\
+    \n:do {\
+    \n  :local best \"\"\
+    \n  :local bestDist 256\
+    \n  :foreach r in=[/ip route find where active=yes dst-address=0.0.0.0/0] do={\
+    \n    :local d [/ip route get \$r distance]\
+    \n    :if (\$d < \$bestDist) do={ :set bestDist \$d; :set best \$r }\
+    \n  }\
+    \n  :if (\$bestDist < 256) do={\
+    \n    :set activeWan [:tostr [/ip route get \$best comment]]\
+    \n    :set wanGw [:tostr [/ip route get \$best immediate-gw]]\
+    \n    :if ([:len \$activeWan] = 0) do={ :set activeWan [:tostr [/ip route get \$best gateway]] }\
+    \n    :local pct [:find \$wanGw \"%\"]\
+    \n    :if ([:typeof \$pct] = \"num\") do={ :set wanIf [:pick \$wanGw (\$pct + 1) [:len \$wanGw]]; :set wanGw [:pick \$wanGw 0 \$pct] }\
+    \n  }\
+    \n} on-error={}\
     \n:local rosVersion [/system resource get version]\
     \n:local relVersion \"\"\
     \n:do { :set relVersion [/file get [find name=\"flash/deployed-version\"] contents] } on-error={}\
@@ -113,7 +133,7 @@ add name=script_HEARTBEAT \
     \n:local totalMB (\$totalMem / 1048576)\
     \n:local hddFreeMB (\$freeHdd / 1048576)\
     \n:local hddTotalMB (\$totalHdd / 1048576)\
-    \n:local payload (\"{\\\"level\\\":\\\"info\\\",\\\"message\\\":\\\"heartbeat\\\",\\\"cpu_load\\\":\" . \$cpuLoad . \",\\\"mem_free_mb\\\":\" . \$freeMB . \",\\\"mem_total_mb\\\":\" . \$totalMB . \",\\\"hdd_free_mb\\\":\" . \$hddFreeMB . \",\\\"hdd_total_mb\\\":\" . \$hddTotalMB . \",\\\"wan_routes\\\":\" . \$wanRoutes . \",\\\"hostname\\\":\\\"\" . \$hostname . \"\\\",\\\"uptime\\\":\\\"\" . \$uptime . \"\\\",\\\"routeros_version\\\":\\\"\" . \$rosVersion . \"\\\",\\\"release_version\\\":\\\"\" . \$relVersion . \"\\\"}\")\
+    \n:local payload (\"{\\\"level\\\":\\\"info\\\",\\\"message\\\":\\\"heartbeat\\\",\\\"cpu_load\\\":\" . \$cpuLoad . \",\\\"mem_free_mb\\\":\" . \$freeMB . \",\\\"mem_total_mb\\\":\" . \$totalMB . \",\\\"hdd_free_mb\\\":\" . \$hddFreeMB . \",\\\"hdd_total_mb\\\":\" . \$hddTotalMB . \",\\\"wan_routes\\\":\" . \$wanRoutes . \",\\\"active_wan\\\":\\\"\" . \$activeWan . \"\\\",\\\"wan_gateway\\\":\\\"\" . \$wanGw . \"\\\",\\\"wan_interface\\\":\\\"\" . \$wanIf . \"\\\",\\\"hostname\\\":\\\"\" . \$hostname . \"\\\",\\\"uptime\\\":\\\"\" . \$uptime . \"\\\",\\\"routeros_version\\\":\\\"\" . \$rosVersion . \"\\\",\\\"release_version\\\":\\\"\" . \$relVersion . \"\\\"}\")\
     \n:do { /tool fetch url=\$sinkUrl http-method=post http-header-field=(\"Authorization:Bearer \" . \$sinkToken . \",Content-Type:application/json\") http-data=\$payload output=none } on-error={ :log warning \"HEARTBEAT: shipping failed\" }"
 
 # --- script_DEADMAN_PING -----------------------------------------------------
@@ -141,21 +161,28 @@ add name=script_DEADMAN_PING \
     \n}"
 
 /system scheduler
-add name=schedule_HEARTBEAT interval=1m start-time=startup \
+# Fixed time-of-day offsets, NOT start-time=startup. A startup-anchored
+# interval scheduler sits at next-run=startup and never counts down until the
+# next reboot; it only looked fine while a nightly reboot woke it every day.
+# On a router that reboots only for updates, heartbeat would go silent after
+# every deploy. Offsets also keep the two away from :00 and from each other.
+add name=schedule_HEARTBEAT interval=1m start-time=00:00:20 \
     on-event="/system script run script_HEARTBEAT" policy=read,test
-add name=schedule_DEADMAN interval=1m start-time=startup \
+add name=schedule_DEADMAN interval=1m start-time=00:00:40 \
     on-event="/system script run script_DEADMAN_PING" policy=read,test
 
 # --- Persistent on-disk logging ----------------------------------------------
 # RouterOS keeps logs in RAM by default: a reboot erases exactly the evidence
 # you need to explain the reboot. This writes warning/error/critical to flash
 # as a rolling buffer, so post-mortem is possible after a rollback.
+# 2000 lines x 2 files: 65535 lines could fill the 16 MB flash of small boards
+# (hEX), and a full flash breaks backups, snapshots and the deploy flag files.
 /system logging
 remove [find action="disklog"]
 
 /system logging action
 :do { remove [find name="disklog"] } on-error={}
-add name="disklog" target=disk disk-file-name=router-log disk-lines-per-file=65535 disk-file-count=2
+add name="disklog" target=disk disk-file-name=router-log disk-lines-per-file=2000 disk-file-count=2
 
 /system logging
 add action=disklog topics=warning

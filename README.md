@@ -23,6 +23,7 @@ Every piece here has been through a production deployment. The comments explain
 - [Quick start](#quick-start)
 - [Repository layout](#repository-layout)
 - [Daily use](#daily-use)
+- [Many routers: engine as a submodule](#many-routers-engine-as-a-submodule)
 - [Documentation](#documentation)
 - [Is this for you?](#is-this-for-you)
 
@@ -95,13 +96,13 @@ converges to it next hour. Same mechanism, no router access, no drama.
 | `engine/02-watchdog.rsc` | Boot-time safety net. Deploy broke routing? Restore and reboot, automatically. |
 | `engine/01-pre-deploy-snapshot.rsc` | Makes the rollback target before every apply. Retention-managed. |
 | `engine/00-observability.rsc` | Structured JSON events + a dead-man's switch, so silence becomes an alert. |
+| `engine/10-maintenance.rsc` | Nightly RouterOS + firmware updates. Reboots only when an update needs it. |
 | `deploy-manifest.json` | The ordered apply list. One source of truth for CI, the router, and local deploys. |
 | `scripts/render.sh` | The single secret-injection engine. CI and local deploy both call it, so they cannot drift. |
 
 **Example config** — the part you replace:
 
 `config/10-network.rsc` (LAN + isolated guest network, firewall, NAT, queue),
-`config/20-maintenance.rsc` (unattended nightly updates),
 `config/30-backup.rsc` (backups + retention).
 
 They are working, deployable examples that encode ordering rules you would
@@ -187,15 +188,16 @@ routeros-gitops/
 │   ├── 00-observability.rsc      log events, heartbeat, dead-man's switch
 │   ├── 01-pre-deploy-snapshot.rsc  rollback target maker
 │   ├── 02-watchdog.rsc           boot-time auto-rollback
+│   ├── 10-maintenance.rsc        updates; reboot only when an update needs it
 │   └── 99-self-update.rsc        the pull agent (imported last, on purpose)
 │
 ├── config/                       YOUR config — examples to replace
 │   ├── 10-network.rsc            LAN + isolated guest, firewall, NAT, queue
-│   ├── 20-maintenance.rsc        nightly RouterOS/firmware update + reboot
 │   └── 30-backup.rsc             weekly backup + retention
 │
 ├── scripts/
 │   ├── render.sh                 THE secret-injection engine (CI + local)
+│   ├── build-release.sh          manifest -> rendered release assets (CI + local)
 │   ├── bootstrap.sh              one-time router + GitHub provisioning
 │   ├── deploy-local.sh           LAN deploy, for provisioning only
 │   └── .env.example
@@ -231,6 +233,38 @@ bypasses the snapshot, the watchdog and the audit trail. Ship a release.
 Impatient? [Force an immediate pull](docs/04-operations.md#forcing-an-immediate-pull)
 — and read that section first, because deleting the one-shot scheduler too
 early kills the running import mid-apply. That has caused a real outage.
+
+## Many routers: engine as a submodule
+
+Forking this template once per router works, until you fix a bug in the
+engine and have to copy the fix into every fork by hand. Forks drift.
+
+The alternative: **one private repo per router, with this repo as a git
+submodule at `gitops/`**, pinned to a tag.
+
+```
+my-router-config/                 PRIVATE, one per router
+├── gitops/                       submodule -> routeros-gitops @ v1.x
+├── config/*.rsc                  this router's config
+├── deploy-manifest.json          engine paths are gitops/engine/...
+├── secrets.map                   only this router's extra secrets/settings
+└── .github/workflows/release.yml copied unchanged from gitops/
+```
+
+- The engine is fixed once, here. Each router picks the fix up by bumping the
+  submodule — a reviewed commit and a release, never a surprise.
+- An old router can stay on an older engine tag until the new one has been
+  tested on similar hardware.
+- One PAT and one secret set per router: a leaked token exposes one site.
+- `render.sh` reads both maps; a site line overrides an engine line with the
+  same placeholder (e.g. `PLACEHOLDER_WAN_PING_TARGETS`).
+- `release.yml` hands all repo secrets and variables to `render.sh` as JSON,
+  so a router-specific secret needs only a `secrets.map` line and
+  `gh secret set`, not a workflow edit.
+
+Keep the engine free of anything model- or site-specific: WiFi, WAN layout,
+CAPs, firewall belong in the router repo. The engine uses only commands that
+work on the oldest RouterOS you run.
 
 ## Documentation
 

@@ -164,7 +164,7 @@ ssh -p 2222 -i ~/.ssh/routeros-gitops ci-deploy@10.1.1.1
 /system script print brief
 #   expect: script_LOG_EVENT, script_HEARTBEAT, script_DEADMAN_PING,
 #           script_PRE_DEPLOY_SNAPSHOT, script_WATCHDOG, script_STARTUP_ALERT,
-#           script_SELF_UPDATE, script_UPGRADE, script_UPDATE, script_REBOOT
+#           script_SELF_UPDATE, script_UPGRADE, script_UPDATE   (no script_REBOOT)
 
 /system scheduler print brief
 #   expect: schedule_SELF_UPDATE with interval=1h and a real next-run time.

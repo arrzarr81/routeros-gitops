@@ -29,7 +29,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-ENV_FILE="$SCRIPT_DIR/.env"
+# Site root holds deploy-manifest.json, config/ and scripts/.env. Same as
+# REPO_ROOT in template mode; the per-router repo when this is a submodule.
+SITE_ROOT="$(cd "${GITOPS_SITE_ROOT:-$PWD}" && pwd)"
+export GITOPS_SITE_ROOT="$SITE_ROOT"
+ENV_FILE="${GITOPS_ENV_FILE:-$SITE_ROOT/scripts/.env}"
 
 ROUTER_IP="${ROUTER_IP:-10.1.1.1}"
 ROUTER_PORT="${ROUTER_PORT:-2222}"
@@ -63,7 +67,7 @@ command -v jq >/dev/null || { echo "ERROR: jq is required (brew install jq)" >&2
 # The manifest is the source of truth, exactly as it is for CI and for the
 # router. Never maintain a second ordered list here — that is how the local
 # path and the remote path drift apart.
-MANIFEST="$REPO_ROOT/deploy-manifest.json"
+MANIFEST="$SITE_ROOT/deploy-manifest.json"
 if [[ ${#TARGETS[@]-0} -eq 0 ]]; then
     while IFS= read -r p; do TARGETS+=("$p"); done < <(jq -r '.[].path' "$MANIFEST")
 fi
@@ -87,7 +91,7 @@ for path in ${TARGETS[@]+"${TARGETS[@]}"}; do
     action=$(echo "$entry" | jq -r '.action')
     dst=$(echo "$entry" | jq -r '.dst')
 
-    "$REPO_ROOT/scripts/render.sh" "$REPO_ROOT/$path" "$WORK_DIR/$dst"
+    "$REPO_ROOT/scripts/render.sh" "$SITE_ROOT/$path" "$WORK_DIR/$dst"
     echo "  rendered $path -> $dst  ($action)"
 
     SFTP_BATCH+=$'\n'"-mkdir $(dirname "$dst")"

@@ -42,8 +42,11 @@
 #   That concurrency has crashed RouterOS (service malfunction / supout.rif).
 #   The guard makes both scripts no-ops unless this really is a fresh boot.
 #
-# CUSTOMISE: change the ping target (8.8.8.8) if your network blocks it or you
-# want to test reachability of something you actually care about.
+# PING TARGETS: PLACEHOLDER_WAN_PING_TARGETS (secrets.map setting, default
+#   1.1.1.1,9.9.9.9). A check passes if ANY target answers. Never list a host
+#   that your routing pins to a single uplink (recursive check-gateway routes
+#   often pin 8.8.8.8 to the primary WAN): with the primary down and the backup
+#   up, that host is unreachable and the watchdog would roll back a good deploy.
 # =============================================================================
 
 /system scheduler
@@ -93,14 +96,17 @@ add name=script_WATCHDOG \
     \n:local maxFails 3\
     \n:local failTimestamp \"\"\
     \n:while (\$checksDone < \$maxChecks) do={\
-    \n  :local received [/tool ping address=8.8.8.8 count=3]\
+    \n  :local received 0\
+    \n  :foreach t in=[:toarray \"PLACEHOLDER_WAN_PING_TARGETS\"] do={\
+    \n    :if (\$received = 0) do={ :do { :set received [/tool ping address=\$t count=3] } on-error={} }\
+    \n  }\
     \n  :if (\$received = 0) do={\
     \n    :set consecutiveFails (\$consecutiveFails + 1)\
     \n    :log warning (\"Watchdog: WAN check FAILED. Consecutive: \" . \$consecutiveFails . \"/\" . \$maxFails)\
     \n    :if (\$consecutiveFails = 1) do={\
     \n      :global logEvent \"wan_down\"\
     \n      :global logLevel \"critical\"\
-    \n      :global logMessage \"WAN ping failed after deploy\"\
+    \n      :global logMessage \"WAN ping failed after deploy (no target answered)\"\
     \n      :do { /system script run script_LOG_EVENT } on-error={}\
     \n    }\
     \n    :if (\$consecutiveFails >= \$maxFails) do={\
@@ -180,7 +186,10 @@ add name=script_STARTUP_ALERT \
     \n:local wanUp false\
     \n:local tries 0\
     \n:while ((\$tries < 18) && (!\$wanUp)) do={\
-    \n  :if ([/tool ping address=8.8.8.8 count=2] > 0) do={ :set wanUp true } else={ :delay 10s; :set tries (\$tries + 1) }\
+    \n  :foreach t in=[:toarray \"PLACEHOLDER_WAN_PING_TARGETS\"] do={\
+    \n    :if (!\$wanUp) do={ :do { :if ([/tool ping address=\$t count=2] > 0) do={ :set wanUp true } } on-error={} }\
+    \n  }\
+    \n  :if (!\$wanUp) do={ :delay 10s; :set tries (\$tries + 1) }\
     \n}\
     \n:local wanStatus \"UP\"\
     \n:if (!\$wanUp) do={ :set wanStatus \"STILL DOWN\" }\

@@ -26,7 +26,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-ENV_FILE="$SCRIPT_DIR/.env"
+# Site root: the per-router repo when this engine is a submodule (run from
+# there), else this repo. Holds scripts/.env and the site's secrets.map.
+SITE_ROOT="$(cd "${GITOPS_SITE_ROOT:-$PWD}" && pwd)"
+ENV_FILE="${GITOPS_ENV_FILE:-$SITE_ROOT/scripts/.env}"
 
 ROUTER_IP="192.168.88.1"
 ADMIN_USER="admin"
@@ -107,8 +110,13 @@ if [[ $DO_SECRETS -eq 1 ]]; then
 
     set -a; . "$ENV_FILE"; set +a
 
-    # Only the env vars named in secrets.map are pushed, and GITOPS_GITHUB_REPO
-    # is skipped: the workflow derives it from ${{ github.repository }}.
+    # Only the env vars named in secrets.map (site + engine) are pushed, and
+    # GITOPS_GITHUB_REPO is skipped: the workflow derives it from
+    # ${{ github.repository }}. Settings (required column "=default") go to
+    # repo VARIABLES, not secrets, and only when .env overrides the default.
+    MAPS=()
+    if [[ "$SITE_ROOT" != "$REPO_ROOT" && -f "$SITE_ROOT/secrets.map" ]]; then MAPS+=("$SITE_ROOT/secrets.map"); fi
+    MAPS+=("$REPO_ROOT/secrets.map")
     while read -r ph env req _; do
         case "$ph" in ''|'#'*) continue ;; esac
         [[ "$env" == "GITOPS_GITHUB_REPO" ]] && continue
@@ -117,12 +125,17 @@ if [[ $DO_SECRETS -eq 1 ]]; then
             if [[ "$req" == "yes" ]]; then
                 echo "  ERROR: required secret $env is empty in .env" >&2; exit 1
             fi
-            echo "  skip $env (optional, not set)"
+            echo "  skip $env (not set; optional or has a default)"
             continue
         fi
-        printf '%s' "$val" | gh secret set "$env"
-        echo "  set  $env"
-    done < <(grep -vE '^[[:space:]]*(#|$)' "$REPO_ROOT/secrets.map")
+        if [[ "$req" == =* ]]; then
+            gh variable set "$env" --body "$val"
+            echo "  var  $env"
+        else
+            printf '%s' "$val" | gh secret set "$env"
+            echo "  set  $env"
+        fi
+    done < <(cat "${MAPS[@]}" | grep -vE '^[[:space:]]*(#|$)' | awk '!seen[$1]++')
 fi
 
 cat <<EOF

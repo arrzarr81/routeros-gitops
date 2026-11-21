@@ -10,8 +10,19 @@
 #   scripts/render.sh --check <dir>    fail if any REQUIRED placeholder survives
 #   scripts/render.sh --list           print the placeholder table
 #
-# Values come from the environment (see secrets.map column 2). Locally those
-# are exported by scripts/.env; in CI they come from the workflow's env: block.
+# TWO MAPS (engine + site)
+#   The engine's own secrets.map (next to this script's parent dir) is always
+#   read. When this repo is used as a git submodule inside a per-router repo,
+#   the router repo's secrets.map is read too. Site root = $GITOPS_SITE_ROOT,
+#   or the current directory. A site line wins over an engine line with the
+#   same placeholder, so a router can override an engine default.
+#   Used standalone (template mode) both roots are the same: read once.
+#
+# VALUE LOOKUP, first hit wins (column 2 of the map names the variable)
+#   1. environment variable          (scripts/.env locally)
+#   2. $GITOPS_SECRETS_JSON          (CI: ${{ toJSON(secrets) }})
+#   3. $GITOPS_VARS_JSON             (CI: ${{ toJSON(vars) }}, non-secret settings)
+#   4. default from column 3 written as =VALUE (non-secret settings only)
 #
 # IMPLEMENTATION NOTES
 #   * sed delimiter is \x01, not / or |, because tokens and URLs contain both.
@@ -21,15 +32,39 @@
 # =============================================================================
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MAP="$REPO_ROOT/secrets.map"
+ENGINE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SITE_ROOT="$(cd "${GITOPS_SITE_ROOT:-$PWD}" && pwd)"
+ENGINE_MAP="$ENGINE_ROOT/secrets.map"
+SITE_MAP="$SITE_ROOT/secrets.map"
 SEP=$'\001'
 
-[[ -f "$MAP" ]] || { echo "render.sh: secrets.map not found at $MAP" >&2; exit 1; }
+[[ -f "$ENGINE_MAP" ]] || { echo "render.sh: secrets.map not found at $ENGINE_MAP" >&2; exit 1; }
 
-# Emits: placeholder<TAB>envvar<TAB>required
+# Emits: placeholder<TAB>envvar<TAB>required   (site lines first, then engine
+# lines whose placeholder the site did not already define)
 read_map() {
-    grep -vE '^[[:space:]]*(#|$)' "$MAP" | awk '{ printf "%s\t%s\t%s\n", $1, $2, $3 }'
+    local maps=()
+    if [[ "$SITE_ROOT" != "$ENGINE_ROOT" && -f "$SITE_MAP" ]]; then maps+=("$SITE_MAP"); fi
+    maps+=("$ENGINE_MAP")
+    cat "${maps[@]}" | grep -vE '^[[:space:]]*(#|$)' \
+        | awk '!seen[$1]++ { printf "%s\t%s\t%s\n", $1, $2, $3 }'
+}
+
+# lookup <ENV_NAME> <required-column>  -> prints the value (may be empty)
+lookup() {
+    local env="$1" req="$2" val=""
+    # `eval` (not ${!x}) for bash 3.2 compatibility; name validated by caller.
+    eval "val=\${$env-}"
+    if [[ -z "$val" && -n "${GITOPS_SECRETS_JSON-}" ]]; then
+        val=$(printf '%s' "$GITOPS_SECRETS_JSON" | jq -r --arg k "$env" '.[$k] // empty')
+    fi
+    if [[ -z "$val" && -n "${GITOPS_VARS_JSON-}" ]]; then
+        val=$(printf '%s' "$GITOPS_VARS_JSON" | jq -r --arg k "$env" '.[$k] // empty')
+    fi
+    if [[ -z "$val" && "$req" == =* ]]; then
+        val="${req#=}"
+    fi
+    printf '%s' "$val"
 }
 
 cmd_list() {
@@ -46,12 +81,10 @@ cmd_render() {
     local -a sed_args=()
     local missing=""
     while IFS=$'\t' read -r ph env req; do
-        # Indirect lookup. `eval` (not ${!x}) for bash 3.2 compatibility — macOS
-        # still ships 3.2 as /bin/bash. Name is validated first so this is safe.
         [[ "$env" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || {
             echo "render.sh: invalid env var name in secrets.map: $env" >&2; exit 1; }
-        local val=""
-        eval "val=\${$env-}"
+        local val
+        val=$(lookup "$env" "$req")
         if [[ -z "$val" ]]; then
             if [[ "$req" == "yes" ]]; then
                 missing="$missing $env"
@@ -92,7 +125,7 @@ cmd_check() {
     local dir="$1"
     local pattern=""
     while IFS=$'\t' read -r ph env req; do
-        [[ "$req" == "yes" ]] || continue
+        [[ "$req" == "yes" || "$req" == =* ]] || continue
         pattern="${pattern:+$pattern|}$ph"
     done < <(read_map)
 
