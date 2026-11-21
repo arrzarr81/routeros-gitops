@@ -18,10 +18,15 @@
 #   /system script run script_PRE_DEPLOY_SNAPSHOT
 #
 # NAME FORMAT
-#   pre-deploy-<date>-HHMM   e.g. pre-deploy-2026-07-19-0750
+#   [flash/]pre-deploy-<date>-HHMM   e.g. flash/pre-deploy-2026-07-19-0750
 #   The "pre-deploy-" prefix is load-bearing: the watchdog and the self-update
 #   rollback path both find the restore target with [/file find where
-#   name~"pre-deploy-"] and take the LAST entry. Don't rename it.
+#   name~"pre-deploy-"] and take the NEWEST name (ISO date-time embedded).
+#   Don't rename it.
+#
+# WHERE: flash/ when the device has a flash directory. On such devices the
+#   file root is RAM: /system backup save name=x lands there and is wiped by
+#   the very reboot a rollback depends on. See docs/06-routeros-gotchas.md.
 #
 # dont-encrypt=yes so the backup is loadable without a password — a rollback
 # that prompts for a passphrase is not a rollback.
@@ -49,7 +54,10 @@ add name=script_PRE_DEPLOY_SNAPSHOT \
     \n  :set i (\$i + 1)\
     \n}\
     \n:local hhmmSafe ([:pick \$rawTime 0 2] . [:pick \$rawTime 3 5])\
-    \n:local snapshotName (\"pre-deploy-\" . \$dateSafe . \"-\" . \$hhmmSafe)\
+    \n# Root is RAM on devices with a flash/ dir (wiped on reboot): save there.\
+    \n:local bkDir \"\"\
+    \n:if ([:len [/file find where name=\"flash\"]] > 0) do={ :set bkDir \"flash/\" }\
+    \n:local snapshotName (\$bkDir . \"pre-deploy-\" . \$dateSafe . \"-\" . \$hhmmSafe)\
     \n:log info (\"Saving pre-deploy snapshot: \" . \$snapshotName)\
     \n/system backup save name=\$snapshotName dont-encrypt=yes\
     \n:delay 3s\

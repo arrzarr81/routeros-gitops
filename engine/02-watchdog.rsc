@@ -28,6 +28,12 @@
 #   Rollback = /system backup load, which reboots immediately. Nothing after
 #   that line in the script ever executes.
 #
+# BACKUP LOCATION
+#   pre-deploy-* (from 01) and confirmed-good-* (saved here on success) live in
+#   flash/ when the device has one: the root there is RAM and would be empty
+#   by the time this boot-time script looks for a rollback target. Target =
+#   newest pre-deploy name. confirmed-good retention: newest 2.
+#
 # WHY PING AND NOT /ping-the-script-way
 #   /ping inside a script returns 0 in some RouterOS builds regardless of
 #   reality. [/tool ping address=... count=3] returns the received count and is
@@ -85,6 +91,15 @@ add name=script_WATCHDOG \
     \n  :log error \"Watchdog: no pre-deploy backup found - rollback impossible. Monitoring anyway.\"\
     \n} else={\
     \n  :local latestFile [/file get (\$allBackups->(\$backupCount - 1)) name]\
+    \n  # Names embed ISO date-time: take the greatest name from \"pre-deploy-\" on,\
+    \n  # so flash/ and root files compare fairly. on-error keeps the find-order\
+    \n  # pick, so a comparison quirk can never cost us the rollback target.\
+    \n  :do {\
+    \n    :foreach b in=\$allBackups do={\
+    \n      :local bn [/file get \$b name]\
+    \n      :if ([:pick \$bn [:find \$bn \"pre-deploy-\"] [:len \$bn]] > [:pick \$latestFile [:find \$latestFile \"pre-deploy-\"] [:len \$latestFile]]) do={ :set latestFile \$bn }\
+    \n    }\
+    \n  } on-error={}\
     \n  # strip the 7-char \".backup\" extension\
     \n  :set latestBackupName [:pick \$latestFile 0 ([:len \$latestFile] - 7)]\
     \n  :log info (\"Watchdog: rollback target if needed: \" . \$latestBackupName)\
@@ -155,8 +170,30 @@ add name=script_WATCHDOG \
     \n  :set gDateSafe (\$gDateSafe . \$ch)\
     \n  :set gI (\$gI + 1)\
     \n}\
-    \n:local goodName (\"confirmed-good-\" . \$gDateSafe . \"-\" . ([:pick \$rawTime 0 2] . [:pick \$rawTime 3 5]))\
+    \n# Root is RAM on devices with a flash/ dir (wiped on reboot): save there.\
+    \n:local bkDir \"\"\
+    \n:if ([:len [/file find where name=\"flash\"]] > 0) do={ :set bkDir \"flash/\" }\
+    \n:local goodName (\$bkDir . \"confirmed-good-\" . \$gDateSafe . \"-\" . ([:pick \$rawTime 0 2] . [:pick \$rawTime 3 5]))\
     \n:do { /system backup save name=\$goodName dont-encrypt=yes } on-error={ :log warning \"Watchdog: confirmed-good backup failed\" }\
+    \n:delay 3s\
+    \n# Retention: keep the 2 newest confirmed-good backups (~67 KB each; small units\
+    \n# have ~2 MB free flash, and a full disk breaks the next pre-deploy save).\
+    \n:local goods [/file find where name~\"confirmed-good-\"]\
+    \n:do {\
+    \n  :while ([:len \$goods] > 2) do={\
+    \n    :local oldest (\$goods->0)\
+    \n    :local oldKey [/file get \$oldest name]\
+    \n    :set oldKey [:pick \$oldKey [:find \$oldKey \"confirmed-good-\"] [:len \$oldKey]]\
+    \n    :foreach g in=\$goods do={\
+    \n      :local gn [/file get \$g name]\
+    \n      :set gn [:pick \$gn [:find \$gn \"confirmed-good-\"] [:len \$gn]]\
+    \n      :if (\$gn < \$oldKey) do={ :set oldest \$g; :set oldKey \$gn }\
+    \n    }\
+    \n    :log info (\"Watchdog: pruning old \" . [/file get \$oldest name])\
+    \n    /file remove \$oldest\
+    \n    :set goods [/file find where name~\"confirmed-good-\"]\
+    \n  }\
+    \n} on-error={ :log warning \"Watchdog: confirmed-good retention failed\" }\
     \n:log info (\"Watchdog complete: deploy healthy, saved \" . \$goodName)"
 
 # --- script_STARTUP_ALERT ----------------------------------------------------

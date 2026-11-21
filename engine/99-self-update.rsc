@@ -32,7 +32,10 @@
 #      pre-deploy backup and reboot. The boot watchdog (engine/02-watchdog.rsc)
 #      is the second safety net on that reboot path.
 #   5. Success -> write tag to flash/deployed-version, clear the flag, save a
-#      confirmed-good backup, ship an event.
+#      confirmed-good backup (flash/ when present, newest 2 kept), ship an event.
+#
+# BACKUPS GO TO flash/ ON DEVICES THAT HAVE IT — the root there is RAM, wiped
+#   on reboot. Rollback picks the newest pre-deploy-* by embedded date-time.
 #
 # THE SELF-IMPORT PROBLEM
 #   This script cannot import the file that defines it — /import would remove
@@ -181,6 +184,8 @@ add name=script_SELF_UPDATE owner=admin dont-require-permissions=no policy=ftp,r
     \n      :local n [:len \$bks]\
     \n      :if (\$n > 0) do={\
     \n        :local f [/file get (\$bks->(\$n - 1)) name]\
+    \n        # newest by embedded date-time; on-error keeps the find-order pick\
+    \n        :do { :foreach b in=\$bks do={ :local bn [/file get \$b name]; :if ([:pick \$bn [:find \$bn \"pre-deploy-\"] [:len \$bn]] > [:pick \$f [:find \$f \"pre-deploy-\"] [:len \$f]]) do={ :set f \$bn } } } on-error={}\
     \n        :local bname [:pick \$f 0 ([:len \$f] - 7)]\
     \n        /file remove [find name=\"flash/rollback-marker\"]\
     \n        /file add name=flash/rollback-marker type=file contents=(\"backup=\" . \$bname . \" reason=selfupdate\")\
@@ -195,7 +200,23 @@ add name=script_SELF_UPDATE owner=admin dont-require-permissions=no policy=ftp,r
     \n        :local cgSafe \"\"\
     \n        :local cgI 0\
     \n        :while (\$cgI < [:len \$cgRaw]) do={ :local ch [:pick \$cgRaw \$cgI (\$cgI + 1)]; :if (\$ch = \"/\") do={ :set ch \"-\" }; :set cgSafe (\$cgSafe . \$ch); :set cgI (\$cgI + 1) }\
-    \n        :do { /system backup save name=(\"confirmed-good-\" . \$cgSafe) dont-encrypt=yes } on-error={}\
+    \n        # flash/ when present: the root is RAM there and is wiped on reboot\
+    \n        :local bkDir \"\"\
+    \n        :if ([:len [/file find where name=\"flash\"]] > 0) do={ :set bkDir \"flash/\" }\
+    \n        :do { /system backup save name=(\$bkDir . \"confirmed-good-\" . \$cgSafe) dont-encrypt=yes } on-error={}\
+    \n        :delay 3s\
+    \n        # keep the 2 newest confirmed-good (~67 KB each, ~2 MB free flash on small units)\
+    \n        :local goods [/file find where name~\"confirmed-good-\"]\
+    \n        :do {\
+    \n          :while ([:len \$goods] > 2) do={\
+    \n            :local oldest (\$goods->0)\
+    \n            :local oldKey [/file get \$oldest name]\
+    \n            :set oldKey [:pick \$oldKey [:find \$oldKey \"confirmed-good-\"] [:len \$oldKey]]\
+    \n            :foreach g in=\$goods do={ :local gn [/file get \$g name]; :set gn [:pick \$gn [:find \$gn \"confirmed-good-\"] [:len \$gn]]; :if (\$gn < \$oldKey) do={ :set oldest \$g; :set oldKey \$gn } }\
+    \n            /file remove \$oldest\
+    \n            :set goods [/file find where name~\"confirmed-good-\"]\
+    \n          }\
+    \n        } on-error={ :log warning \"SELF_UPDATE: confirmed-good retention failed\" }\
     \n        :if (\$hadErr) do={\
     \n          :log warning (\"SELF_UPDATE: \" . \$tag . \" applied WITH errors\")\
     \n          :global logEvent \"selfupdate_applied_warn\"\

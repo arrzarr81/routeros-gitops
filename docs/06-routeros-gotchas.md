@@ -304,6 +304,28 @@ A full disk breaks `/system backup save` → breaks the pre-deploy snapshot →
 breaks rollback. Keep the prune schedule in `config/30-backup.rsc`, and watch
 `free-hdd-space` in the heartbeat.
 
+### Files outside `flash/` live in RAM on flash-dir devices
+
+On devices that show a `flash` directory in `/file print` (e.g. RBLtAP-2HnD,
+hAP lite and other small-flash boards), the file root is a RAM disk. Only paths
+under `flash/` survive a reboot. `/system backup save name=x` writes `x.backup`
+to the **root** — confirmed on an RBLtAP-2HnD running RouterOS 7.25.1 — so it is
+gone after the next reboot.
+
+That kills rollback: the boot watchdog runs *after* a reboot and finds no
+`pre-deploy-*` backup. Detect the case at runtime and prefix the name:
+
+```routeros
+:local bkDir ""
+:if ([:len [/file find where name="flash"]] > 0) do={ :set bkDir "flash/" }
+/system backup save name=($bkDir . "pre-deploy-...") dont-encrypt=yes
+/system backup load name=flash/pre-deploy-...   ;# load takes the flash/ path too
+```
+
+The engine does this for `pre-deploy-*` and `confirmed-good-*`, and writes
+its state files (`flash/deploy-in-progress`, `flash/deployed-version`,
+`flash/rollback-marker`) under `flash/` for the same reason.
+
 ---
 
 ## Environment
