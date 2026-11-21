@@ -45,6 +45,8 @@ add name=script_PRE_DEPLOY_SNAPSHOT \
     source=":local rawDate [/system clock get date]\
     \n:local rawTime [/system clock get time]\
     \n# Format-agnostic: handles both legacy \"mmm/dd/yyyy\" and ISO \"yyyy-mm-dd\"\
+    \n# Normalise legacy \"mmm/dd/yyyy\" to ISO so the digit sort key stays chronological\
+    \n:if ([:pick \$rawDate 3 4] = \"/\") do={ :local mp [:find \"janfebmaraprmayjunjulaugsepoctnovdec\" [:pick \$rawDate 0 3]]; :if ([:typeof \$mp] = \"num\") do={ :local mm [:tostr ((\$mp / 3) + 1)]; :if ([:len \$mm] < 2) do={ :set mm (\"0\" . \$mm) }; :set rawDate ([:pick \$rawDate 7 11] . \"-\" . \$mm . \"-\" . [:pick \$rawDate 4 6]) } }\
     \n:local dateSafe \"\"\
     \n:local i 0\
     \n:while (\$i < [:len \$rawDate]) do={\

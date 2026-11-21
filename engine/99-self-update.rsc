@@ -200,6 +200,8 @@ add name=script_SELF_UPDATE owner=admin dont-require-permissions=no policy=ftp,r
     \n        /file add name=flash/deployed-version type=file contents=\$tag\
     \n        /file remove [find name=\"flash/deploy-in-progress\"]\
     \n        :local cgRaw [/system clock get date]\
+    \n# Normalise legacy \"mmm/dd/yyyy\" to ISO so the digit sort key stays chronological\
+    \n:if ([:pick \$cgRaw 3 4] = \"/\") do={ :local mp [:find \"janfebmaraprmayjunjulaugsepoctnovdec\" [:pick \$cgRaw 0 3]]; :if ([:typeof \$mp] = \"num\") do={ :local mm [:tostr ((\$mp / 3) + 1)]; :if ([:len \$mm] < 2) do={ :set mm (\"0\" . \$mm) }; :set cgRaw ([:pick \$cgRaw 7 11] . \"-\" . \$mm . \"-\" . [:pick \$cgRaw 4 6]) } }\
     \n        :local cgSafe \"\"\
     \n        :local cgI 0\
     \n        :while (\$cgI < [:len \$cgRaw]) do={ :local ch [:pick \$cgRaw \$cgI (\$cgI + 1)]; :if (\$ch = \"/\") do={ :set ch \"-\" }; :set cgSafe (\$cgSafe . \$ch); :set cgI (\$cgI + 1) }\

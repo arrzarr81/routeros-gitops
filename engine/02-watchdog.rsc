@@ -168,6 +168,8 @@ add name=script_WATCHDOG \
     \n:do { /system script run script_LOG_EVENT } on-error={}\
     \n:local rawDate [/system clock get date]\
     \n:local rawTime [/system clock get time]\
+    \n# Normalise legacy \"mmm/dd/yyyy\" to ISO so the digit sort key stays chronological\
+    \n:if ([:pick \$rawDate 3 4] = \"/\") do={ :local mp [:find \"janfebmaraprmayjunjulaugsepoctnovdec\" [:pick \$rawDate 0 3]]; :if ([:typeof \$mp] = \"num\") do={ :local mm [:tostr ((\$mp / 3) + 1)]; :if ([:len \$mm] < 2) do={ :set mm (\"0\" . \$mm) }; :set rawDate ([:pick \$rawDate 7 11] . \"-\" . \$mm . \"-\" . [:pick \$rawDate 4 6]) } }\
     \n:local gDateSafe \"\"\
     \n:local gI 0\
     \n:while (\$gI < [:len \$rawDate]) do={\
