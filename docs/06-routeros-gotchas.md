@@ -61,6 +61,7 @@ When in doubt, single-line it.
 | Installing a package update | `/system package update install`, **not** `upgrade`. |
 | `start-date=` in `/system scheduler add` | Rejects the string from `/system clock get date`. Omit it. |
 | `/system ssh` in a script | Needs an interactive terminal. Use `/system ssh-exec`. |
+| `find action="name"` on a name that does not exist | Does **not** match nothing: the unknown name resolves to item `*0`, so `/system logging find action="disklog"` returns every `memory` rule (defaults included). Check that the referenced item exists first. Seen on RouterOS 7.25.1. |
 
 ---
 
@@ -324,7 +325,8 @@ That kills rollback: the boot watchdog runs *after* a reboot and finds no
 
 The engine does this for `pre-deploy-*` and `confirmed-good-*`, and writes
 its state files (`flash/deploy-in-progress`, `flash/deployed-version`,
-`flash/rollback-marker`) under `flash/` for the same reason.
+`flash/rollback-marker`) under `flash/` for the same reason. A `target=disk`
+logging action needs the prefix too (`disk-file-name=flash/router-log`).
 
 ---
 

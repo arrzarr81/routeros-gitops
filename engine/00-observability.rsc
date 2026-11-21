@@ -177,12 +177,19 @@ add name=schedule_DEADMAN interval=1m start-time=00:00:40 \
 # as a rolling buffer, so post-mortem is possible after a rollback.
 # 2000 lines x 2 files: 65535 lines could fill the 16 MB flash of small boards
 # (hEX), and a full flash breaks backups, snapshots and the deploy flag files.
+# Guard the rule removal on the action existing: when no action is named
+# "disklog", [find action="disklog"] does NOT return nothing — the unknown name
+# resolves to action *0 ("memory"), so it matches every memory rule, including
+# the defaults ("can not remove default rules" aborts the import) and any
+# site rules that log to memory. default=no is a second fence.
 /system logging
-remove [find action="disklog"]
+:if ([:len [/system logging action find where name="disklog"]] > 0) do={ /system logging remove [find where action="disklog" default=no] }
 
+# File in flash/ when the device has one: the root there is RAM, and a log in
+# RAM is gone after exactly the reboot it was meant to explain.
 /system logging action
 :do { remove [find name="disklog"] } on-error={}
-add name="disklog" target=disk disk-file-name=router-log disk-lines-per-file=2000 disk-file-count=2
+:do { :local f "router-log"; :if ([:len [/file find where name="flash"]] > 0) do={ :set f "flash/router-log" }; /system logging action add name="disklog" target=disk disk-file-name=$f disk-lines-per-file=2000 disk-file-count=2 }
 
 /system logging
 add action=disklog topics=warning
