@@ -55,7 +55,9 @@ add name=script_BACKUP_WEEKLY \
     \n  :set dateSafe (\$dateSafe . \$ch)\
     \n  :set i (\$i + 1)\
     \n}\
-    \n:local base (\"weekly-\" . \$dateSafe)\
+    \n:local bkDir \"\"\
+    \n:if ([:len [/file find where name=\"flash\"]] > 0) do={ :set bkDir \"flash/\" }\
+    \n:local base (\$bkDir . \"weekly-\" . \$dateSafe)\
     \n:do {\
     \n  /system backup save name=\$base dont-encrypt=yes\
     \n  :delay 3s\
@@ -73,29 +75,38 @@ add name=script_BACKUP_WEEKLY \
     \n}\
     \n:do { /system script run script_LOG_EVENT } on-error={}"
 
-# Retention. Keeps the N newest of each family and deletes from the START of
-# the find list. Note /file find order is insertion order, not sorted by name —
-# the date-stamped naming above keeps those equivalent in practice.
+# Retention. Keeps the N newest of each family and deletes the OLDEST by numeric
+# key (all digits of the file name -> :tonum), same approach as the engine.
+# RouterOS cannot compare strings with < or > ("cannot compare if string is less
+# than string"), and /file find order is not chronological. Paths include bkDir
+# (flash/ when present), the same place the engine and the weekly script save.
+# weekly-* is pruned per extension (.backup / .rsc), so "2" means two weekly
+# pairs. confirmed-good x2 matches the engine's own retention.
 add name=script_BACKUP_PRUNE \
     policy=read,write,test \
     owner=admin \
     dont-require-permissions=no \
-    source=":local prune do={\
+    source=":local bkDir \"\"\
+    \n:if ([:len [/file find where name=\"flash\"]] > 0) do={ :set bkDir \"flash/\" }\
+    \n:local prune do={\
+    \n  :local fkey do={ :local d \"\"; :for i from=0 to=([:len \$1] - 1) do={ :local c [:pick \$1 \$i (\$i + 1)]; :if (\$c~\"[0-9]\") do={ :set d (\$d . \$c) } }; :return [:tonum \$d] }\
     \n  :local files [/file find where name~\$1]\
-    \n  :local n [:len \$files]\
-    \n  :if (\$n > \$2) do={\
-    \n    :local toDelete (\$n - \$2)\
-    \n    :local k 0\
-    \n    :while (\$k < \$toDelete) do={\
-    \n      :log info (\"Pruning: \" . [/file get (\$files->\$k) name])\
-    \n      /file remove (\$files->\$k)\
-    \n      :set k (\$k + 1)\
+    \n  :while ([:len \$files] > \$2) do={\
+    \n    :local oldest (\$files->0)\
+    \n    :local oldKey [\$fkey [/file get \$oldest name]]\
+    \n    :foreach f in=\$files do={\
+    \n      :local k [\$fkey [/file get \$f name]]\
+    \n      :if (\$k < \$oldKey) do={ :set oldest \$f; :set oldKey \$k }\
     \n    }\
+    \n    :log info (\"Pruning: \" . [/file get \$oldest name])\
+    \n    /file remove \$oldest\
+    \n    :set files [/file find where name~\$1]\
     \n  }\
     \n}\
-    \n\$prune \"weekly-\" 4\
-    \n\$prune \"confirmed-good-\" 3\
-    \n\$prune \"pre-deploy-\" 3\
+    \n:do { \$prune (\"^\" . \$bkDir . \"weekly-.*backup\\\$\") 2 } on-error={ :log warning \"Prune weekly .backup failed\" }\
+    \n:do { \$prune (\"^\" . \$bkDir . \"weekly-.*rsc\\\$\") 2 } on-error={ :log warning \"Prune weekly .rsc failed\" }\
+    \n:do { \$prune (\"^\" . \$bkDir . \"confirmed-good-\") 2 } on-error={ :log warning \"Prune confirmed-good failed\" }\
+    \n:do { \$prune (\"^\" . \$bkDir . \"pre-deploy-\") 3 } on-error={ :log warning \"Prune pre-deploy failed\" }\
     \n:local freeHdd [/system resource get free-hdd-space]\
     \n:local freeKB (\$freeHdd / 1024)\
     \n:log info (\"Backup prune complete. Free flash: \" . \$freeKB . \" KiB\")\
