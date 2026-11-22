@@ -69,10 +69,10 @@ no `lte_*` fields. A modem that answers without signal keys (no SIM, radio off)
 ## Fields
 
 **Missing values are omitted, never sent as 0** — a chart shows a gap, not a
-fake "0 dBm" (the Adam router's script sent 0 on monitor errors).
+fake "0 dBm" (an earlier LTE script sent 0 on monitor errors).
 
-`message=telemetry` (names match the Patkowo and Adam dashboards, so their SQL
-ports by changing only `{{source}}`):
+`message=telemetry` (field names follow a common WiFi/CAP + LTE dashboard
+layout, so chart SQL ports between routers by changing only `{{source}}`):
 
 | Field | Type | Source |
 |---|---|---|
@@ -106,7 +106,7 @@ keys never leak between event types, e.g.
 
 ## Not covered
 
-- Ethernet link speed per port / per CAP uplink (Patkowo `link_status`) — not
+- Ethernet link speed per port / per CAP uplink (a `link_status` report) — not
   in this module yet.
 - LTE delivered by an external box on an ethernet WAN is invisible here
   (`lte_present=0`); that box would have to run the module itself.

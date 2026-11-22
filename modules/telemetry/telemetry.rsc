@@ -23,8 +23,8 @@
 #   minute%15 = 2     message=cap_version  one ARRAY, one object per CAP
 #   Arrays keep it to one request per run; Better Stack stores each element as
 #   its own row. A sink that rejects JSON arrays needs a per-object loop here.
-#   Field names match the Patkowo (WiFi/CAP) and Adam (LTE) dashboards, so
-#   their chart SQL ports by changing only {{source}}.
+#   Field names follow a common WiFi/CAP + LTE dashboard layout, so chart SQL
+#   ports between routers by changing only {{source}}.
 #
 # DETECTION AT RUN TIME (no interface names in this file)
 #   wifi_backend  capsman   /caps-man manager enabled (legacy wireless package)
