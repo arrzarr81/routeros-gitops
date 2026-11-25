@@ -49,9 +49,19 @@
 #   PLACEHOLDER_TELEMETRY_GUEST_SSID_RE   optional RouterOS regex; clients whose
 #       SSID matches count as guest_clients, the rest home_clients. Unset ->
 #       all home. Must not contain " \ or $.
+#   PLACEHOLDER_TELEMETRY_WAN2_IFACE      optional backup uplink on a plain
+#       ethernet interface (e.g. an external LTE box). Set -> wan2_* fields:
+#       interface rx/tx kbps, wan2_route_up (an enabled default route resolves
+#       via that interface), ping RTT/loss to its gateway, and ping RTT/loss to
+#       an internet target ONLY while that uplink carries the active default
+#       route (a ping cannot be forced through a standby uplink without a
+#       dedicated route, so none is sent then). Unset -> no wan2_* fields.
+#   PLACEHOLDER_TELEMETRY_WAN2_GW         optional gateway to ping; unset -> the
+#       gateway of the default route that resolves via WAN2_IFACE.
+#   PLACEHOLDER_TELEMETRY_WAN2_TARGET     internet ping target (default 1.1.1.1).
 #
-# REQUIRES: RouterOS 7. Policy read,test (fetch + monitor). Footprint: one
-# script of ~7 KB, no files.
+# REQUIRES: RouterOS 7. Policy read,test (fetch + monitor + ping). Footprint:
+# one script of ~9 KB, no files.
 # NOTE ON source="..." : every runtime $var is written \$var and every quote \".
 # =============================================================================
 
@@ -141,6 +151,32 @@ add name=script_TELEMETRY \
     \n  :set p [\$addS p=\$p k=\"lte_status\" v=(\$m->\"registration-status\")]\
     \n  :set p [\$addS p=\$p k=\"lte_data_class\" v=(\$m->\"data-class\")]\
     \n  :do { :local t [/interface monitor-traffic \$lif once as-value]; :set p [\$addN p=\$p k=\"lte_rx_kbps\" v=((\$t->\"rx-bits-per-second\") / 1000)]; :set p [\$addN p=\$p k=\"lte_tx_kbps\" v=((\$t->\"tx-bits-per-second\") / 1000)] } on-error={}\
+    \n}\
+    \n:local w2If \"PLACEHOLDER_TELEMETRY_WAN2_IFACE\"\
+    \n:if (\$w2If ~ \"^PLACEHOLDER_\") do={ :set w2If \"\" }\
+    \n:if ([:len \$w2If] > 0) do={\
+    \n  :local w2Gw \"PLACEHOLDER_TELEMETRY_WAN2_GW\"; :if (\$w2Gw ~ \"^PLACEHOLDER_\") do={ :set w2Gw \"\" }\
+    \n  :local w2Tg \"PLACEHOLDER_TELEMETRY_WAN2_TARGET\"; :if (\$w2Tg ~ \"^PLACEHOLDER_\") do={ :set w2Tg \"\" }\
+    \n  :local addP do={\
+    \n    :local a; :do { :set a [/ping \$h count=5 interval=200ms as-value] } on-error={}\
+    \n    :if ([:typeof \$a] != \"array\" || [:len \$a] = 0) do={ :return \$p }\
+    \n    :local n 0; :local s 0; :local c [:len \$a]\
+    \n    :foreach x in=\$a do={ :if ([:typeof (\$x->\"time\")] = \"time\" && [:typeof (\$x->\"status\")] = \"nothing\") do={ :set n (\$n + 1); :set s (\$s + ([:tonsec (\$x->\"time\")] / 1000)) } }\
+    \n    :local o (\$p . \",\\\"\" . \$k . \"_loss_pct\\\":\" . (((\$c - \$n) * 100) / \$c))\
+    \n    :if (\$n > 0) do={ :local u (\$s / \$n); :set o (\$o . \",\\\"\" . \$k . \"_rtt_ms\\\":\" . (\$u / 1000) . \".\" . ((\$u % 1000) / 100)) }\
+    \n    :return \$o\
+    \n  }\
+    \n  :do { :local t [/interface monitor-traffic \$w2If once as-value]; :set p [\$addN p=\$p k=\"wan2_rx_kbps\" v=((\$t->\"rx-bits-per-second\") / 1000)]; :set p [\$addN p=\$p k=\"wan2_tx_kbps\" v=((\$t->\"tx-bits-per-second\") / 1000)] } on-error={}\
+    \n  :local w2Up 0; :local bestIf \"\"; :local bestD 256\
+    \n  :foreach r in=[/ip route find where dst-address=0.0.0.0/0 disabled=no] do={\
+    \n    :local ig [:tostr [/ip route get \$r immediate-gw]]; :local pc [:find \$ig \"%\"]; :local gi \"\"\
+    \n    :if ([:typeof \$pc] = \"num\") do={ :set gi [:pick \$ig (\$pc + 1) [:len \$ig]] }\
+    \n    :if (\$gi = \$w2If) do={ :set w2Up 1; :if ([:len \$w2Gw] = 0) do={ :set w2Gw [:pick \$ig 0 \$pc] } }\
+    \n    :if ([/ip route get \$r active] = true && [/ip route get \$r distance] < \$bestD) do={ :set bestD [/ip route get \$r distance]; :set bestIf \$gi }\
+    \n  }\
+    \n  :set p (\$p . \",\\\"wan2_route_up\\\":\" . \$w2Up)\
+    \n  :if ([:len \$w2Gw] > 0) do={ :set p [\$addP p=\$p k=\"wan2_gw\" h=\$w2Gw] }\
+    \n  :if (\$bestIf = \$w2If && [:len \$w2Tg] > 0) do={ :set p [\$addP p=\$p k=\"wan2_inet\" h=\$w2Tg] }\
     \n}\
     \n:set p (\$p . \",\\\"lte_present\\\":\" . \$lp . \"}\")\
     \n\$post u=\$sinkUrl t=\$sinkToken d=\$p\

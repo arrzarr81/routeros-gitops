@@ -30,6 +30,12 @@ wireless, CAPsMAN, LTE or interface config.
    it contains the sink token).
 5. Register the new fields on the log source (Better Stack: metrics/labels via
    API — a field that is not registered never reaches a chart).
+6. Optional: backup uplink on a plain ethernet interface (an external LTE
+   box, a second ISP router). Set `GITOPS_TELEMETRY_WAN2_IFACE` to that
+   interface name; optionally `GITOPS_TELEMETRY_WAN2_GW` (gateway to ping,
+   default = the gateway of the default route that resolves via that interface)
+   and `GITOPS_TELEMETRY_WAN2_TARGET` (internet ping target, default `1.1.1.1`).
+   See "Backup uplink fields" below.
 
 To disable: remove the manifest entry and run once
 `/system scheduler remove [find name="schedule_TELEMETRY"]; /system script remove [find name="script_TELEMETRY"]`.
@@ -38,7 +44,7 @@ To disable: remove the manifest entry and run once
 
 One script, `script_TELEMETRY`, one scheduler every minute at `:50`
 (heartbeat is `:20`, deadman `:40`). Fixed start-time, never `startup`.
-Footprint: ~7 KB script, no files. One HTTPS POST per minute, one or two more
+Footprint: ~9 KB script, no files. One HTTPS POST per minute, one or two more
 every 5 / 15 minutes.
 
 | When | `message` | Shape |
@@ -93,6 +99,26 @@ layout, so chart SQL ports between routers by changing only `{{source}}`):
 
 IMEI / IMSI / ICCID are never sent.
 
+### Backup uplink fields (only with `GITOPS_TELEMETRY_WAN2_IFACE` set)
+
+Sent in the same `message=telemetry` object. The box behind the interface is
+never queried; everything is measured on the router.
+
+| Field | Type | Source |
+|---|---|---|
+| `wan2_rx_kbps`, `wan2_tx_kbps` | metric | `/interface monitor-traffic <if> once` bps / 1000 |
+| `wan2_route_up` | metric | 1 = an enabled `0.0.0.0/0` route resolves via the interface (its `immediate-gw` ends in `%<if>`), standby or active; 0 = none (link down, gateway unresolved) |
+| `wan2_gw_rtt_ms`, `wan2_gw_loss_pct` | metric | 5 pings at 200 ms to the gateway; RTT = average of replies (omitted when none), loss in % |
+| `wan2_inet_rtt_ms`, `wan2_inet_loss_pct` | metric | 5 pings to the target, **only while the backup uplink carries the active default route** (lowest-distance active one) |
+
+Why no internet ping on a standby uplink: `ping interface=<if>` treats any
+address as on-link (ARP for the target, never answered) and `src-address`
+does not change the route lookup, so a ping is forced through a standby uplink
+only with a dedicated route or routing table. The module does not add routes;
+a site that wants it can add one and point `GITOPS_TELEMETRY_WAN2_TARGET` at
+a host routed that way. Devices in `device-mode` without `flood-ping` are
+fine: plain `/ping as-value` is used.
+
 `message=wifi_client`: `client_mac`, `client_host` + `client_ip` (DHCP lease, if
 any), `client_ssid`, `client_radio` (registration-table `interface`),
 `client_signal` (dBm: `rx-signal` / `signal` / `signal-strength`).
@@ -108,7 +134,8 @@ keys never leak between event types, e.g.
 
 - Ethernet link speed per port / per CAP uplink (a `link_status` report) — not
   in this module yet.
-- LTE delivered by an external box on an ethernet WAN is invisible here
-  (`lte_present=0`); that box would have to run the module itself.
+- Radio quality of LTE delivered by an external box on an ethernet WAN
+  (`lte_present=0`); that box would have to run the module itself. Its
+  reachability and traffic are covered by the backup uplink fields (`wan2_*`).
 - The `wifi` backend (new package) branch is written from the RouterOS docs and
   has not been run on hardware yet; `capsman` was verified on RouterOS 7.25.1.
