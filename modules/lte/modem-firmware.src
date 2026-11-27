@@ -1,0 +1,67 @@
+:local mode "PLACEHOLDER_MODEM_FW_MODE"
+:if ($mode ~ "^PLACEHOLDER_") do={ :set mode "notify" }
+:local target "PLACEHOLDER_MODEM_FW_PING_TARGET"
+:if ($target ~ "^PLACEHOLDER_") do={ :set target "1.1.1.1" }
+:local waitMax 900
+:local send do={
+  :global logEvent; :global logLevel; :global logMessage
+  :set logEvent $e; :set logLevel $l; :set logMessage $m
+  :log info ("MODEM_FW " . $e . ": " . $m)
+  :do { /system script run script_LOG_EVENT } on-error={ :log warning "MODEM_FW: script_LOG_EVENT failed" }
+}
+:local fwGet do={
+  :local r ""
+  :do { :local f [/interface lte firmware-upgrade $i as-value]; :set r ([:tostr ($f->"installed")] . "|" . [:tostr ($f->"latest")]) } on-error={ :set r "" }
+  :return $r
+}
+:local linkOk do={
+  :local up false
+  :do { :set up [/interface get [find name=$i] running] } on-error={}
+  :if ($up) do={ :if ([/ping $t count=3] > 0) do={ :return true } }
+  :return false
+}
+:if ([/system resource get uptime] < 1h) do={ $send e="modem_fw_skip" l="info" m="uptime below 1h (nightly maintenance just ran)"; :error "MODEM_FW: skipped" }
+:if ([:len [/file find name~"deploy-in-progress"]] > 0) do={ $send e="modem_fw_skip" l="info" m="deploy in progress"; :error "MODEM_FW: skipped" }
+:foreach id in=[/interface lte find where disabled=no] do={
+  :local lif [/interface get $id name]
+  :local go true
+  :if (![/interface get $id running]) do={ $send e="modem_fw_skip" l="info" m=($lif . ": interface not running (no SIM / no signal)"); :set go false }
+  :local fw ""
+  :if ($go) do={
+    :set fw [$fwGet i=$lif]
+    :if ([:len $fw] = 0) do={ $send e="modem_fw_unsupported" l="warning" m=($lif . ": firmware-upgrade check failed (modem not supported or server unreachable)"); :set go false }
+  }
+  :local inst ""; :local latest ""
+  :if ($go) do={
+    :local p [:find $fw "|"]
+    :set inst [:pick $fw 0 $p]; :set latest [:pick $fw ($p + 1) [:len $fw]]
+    :if (([:len $latest] = 0) or ($latest = $inst)) do={ $send e="modem_fw_current" l="info" m=($lif . ": " . $inst); :set go false }
+  }
+  :if ($go and ($mode != "auto")) do={ $send e="modem_fw_available" l="warning" m=($lif . ": " . $inst . " -> " . $latest . " (notify mode, not installed)"); :set go false }
+  :if ($go) do={
+    $send e="modem_fw_upgrade_start" l="warning" m=($lif . ": " . $inst . " -> " . $latest . ", LTE will drop for a few minutes")
+    :delay 5s
+    :do { /interface lte firmware-upgrade $lif upgrade=yes } on-error={ :log warning ("MODEM_FW: upgrade command returned an error on " . $lif) }
+    :delay 60s
+    :local back false
+    :local waited 60
+    :while ((!$back) and ($waited < $waitMax)) do={
+      :if ([$linkOk i=$lif t=$target]) do={ :set back true } else={ :delay 30s; :set waited ($waited + 30) }
+    }
+    :if (!$back) do={
+      $send e="modem_fw_recovery" l="critical" m=($lif . ": no LTE " . $waitMax . "s after upgrade, disable/enable interface")
+      :do { /interface disable [find name=$lif]; :delay 10s; /interface enable [find name=$lif] } on-error={}
+      :delay 300s
+      :if ([$linkOk i=$lif t=$target]) do={ :set back true }
+    }
+    :if ($back) do={
+      :local after [$fwGet i=$lif]
+      :local now [:pick $after 0 [:find $after "|"]]
+      :if (($now != $inst) and ([:len $now] > 0)) do={ $send e="modem_fw_upgraded" l="info" m=($lif . ": " . $inst . " -> " . $now) } else={ $send e="modem_fw_failed" l="warning" m=($lif . ": LTE back but firmware still " . $inst . " (reported " . $now . ")") }
+    } else={
+      $send e="modem_fw_recovery_reboot" l="critical" m=($lif . ": LTE still down after interface reset, rebooting once")
+      :delay 5s
+      /system reboot
+    }
+  }
+}
