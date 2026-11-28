@@ -111,7 +111,9 @@ cmd_render() {
 
     mkdir -p "$(dirname "$dst")"
     # Guarded expansion: an empty array under `set -u` is an error on bash 3.2.
-    if [[ ${#sed_args[@]-0} -eq 0 ]]; then
+    # `${#arr[@]-0}` is a syntax error on bash 5 (CI runner); `${arr[*]+x}`
+    # works on both.
+    if [[ -z "${sed_args[*]+x}" ]]; then
         cp "$src" "$dst"
     else
         sed ${sed_args[@]+"${sed_args[@]}"} "$src" > "$dst"
