@@ -27,3 +27,6 @@ Thumbs.db
 *.swp
 .idea/
 .vscode/
+
+# Private planning notes (site names) — never in the public repo
+tasks/
