@@ -11,7 +11,7 @@
 }
 :local fwGet do={
   :local r ""
-  :do { :local f [/interface lte firmware-upgrade $i as-value]; :set r ([:tostr ($f->"installed")] . "|" . [:tostr ($f->"latest")]) } on-error={ :set r "" }
+  :do { :local f [/interface lte firmware-upgrade $i duration=30s as-value]; :set r ([:tostr ($f->"installed")] . "|" . [:tostr ($f->"latest")] . "|" . [:tostr ($f->"status")]) } on-error={ :set r "" }
   :return $r
 }
 :local linkOk do={
@@ -33,9 +33,10 @@
   }
   :local inst ""; :local latest ""
   :if ($go) do={
-    :local p [:find $fw "|"]
-    :set inst [:pick $fw 0 $p]; :set latest [:pick $fw ($p + 1) [:len $fw]]
-    :if (([:len $latest] = 0) or ($latest = $inst)) do={ $send e="modem_fw_current" l="info" m=($lif . ": " . $inst); :set go false }
+    :local p [:find $fw "|"]; :local q [:find $fw "|" $p]
+    :set inst [:pick $fw 0 $p]; :set latest [:pick $fw ($p + 1) $q]; :local st [:pick $fw ($q + 1) [:len $fw]]
+    :if (([:len $latest] = 0) and ($st ~ "checking")) do={ $send e="modem_fw_skip" l="info" m=($lif . ": firmware check did not finish in 30s (" . $inst . ")"); :set go false }
+    :if ($go and (([:len $latest] = 0) or ($latest = $inst))) do={ $send e="modem_fw_current" l="info" m=($lif . ": " . $inst . " (" . $st . ")"); :set go false }
   }
   :if ($go and ($mode != "auto")) do={ $send e="modem_fw_available" l="warning" m=($lif . ": " . $inst . " -> " . $latest . " (notify mode, not installed)"); :set go false }
   :if ($go) do={
