@@ -29,10 +29,11 @@ Pick the run day so that someone can reach the device if the modem does not come
 For every enabled `lte` interface, once a week:
 
 1. Skip (event `modem_fw_skip`) if uptime < 1 h, a deploy flag exists, or the interface is not running.
-2. `firmware-upgrade <iface> as-value` → `installed` vs `latest`. Check fails → `modem_fw_unsupported`.
-   Equal → `modem_fw_current`. Newer and `notify` → `modem_fw_available`.
+2. `firmware-upgrade <iface> duration=30s as-value` → `installed` vs `latest`. Check fails → `modem_fw_unsupported`;
+   still `checking...` after 30 s → `modem_fw_skip`. Equal (or `latest` empty) → `modem_fw_current`. Newer and `notify` → `modem_fw_available`.
 3. `auto`: `modem_fw_upgrade_start` is sent **before** the upgrade (the link drops), then
-   `firmware-upgrade <iface> upgrade=yes`.
+   `firmware-upgrade <iface> upgrade=yes`. A configured ping watchdog (`/system watchdog watch-address`)
+   is set to `none` for the upgrade and restored afterwards (before a recovery reboot too).
 4. Wait up to 15 min for the interface to run and a ping to succeed → `modem_fw_upgraded`
    (or `modem_fw_failed` if the version did not change).
 5. Not back: `modem_fw_recovery` + interface disable/enable, wait 5 min; still down →
@@ -47,3 +48,8 @@ while it upgrades. A dead-man's-switch (`PLACEHOLDER_DEADMAN_URL`) covers the ca
   `modem_fw_unsupported` and use `notify` there.
 - Check free storage on 16 MB devices before the first upgrade.
 - Some modems hang after a soft reboot and need a power cycle. On such hardware use `notify`.
+- `firmware-upgrade ... once as-value` returns only `installed` with `status=checking...`; `latest`
+  shows up after a few seconds, hence `duration=30s`.
+- A ping watchdog over the LTE link reboots the device while the modem is flashing (seen in a pilot:
+  `System rebooted because of ping watchdog timeout`; the flash had finished, the success event was lost).
+  The module pauses it; if power fails mid-upgrade, check that `watch-address` was restored.

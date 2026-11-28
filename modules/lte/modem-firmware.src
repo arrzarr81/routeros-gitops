@@ -41,6 +41,8 @@
   :if ($go and ($mode != "auto")) do={ $send e="modem_fw_available" l="warning" m=($lif . ": " . $inst . " -> " . $latest . " (notify mode, not installed)"); :set go false }
   :if ($go) do={
     $send e="modem_fw_upgrade_start" l="warning" m=($lif . ": " . $inst . " -> " . $latest . ", LTE will drop for a few minutes")
+    :local wd [:tostr [/system watchdog get watch-address]]
+    :if ($wd != "none") do={ /system watchdog set watch-address=none; :log info ("MODEM_FW: ping watchdog " . $wd . " paused for the upgrade") }
     :delay 5s
     :do { /interface lte firmware-upgrade $lif upgrade=yes } on-error={ :log warning ("MODEM_FW: upgrade command returned an error on " . $lif) }
     :delay 60s
@@ -55,6 +57,7 @@
       :delay 300s
       :if ([$linkOk i=$lif t=$target]) do={ :set back true }
     }
+    :if ($wd != "none") do={ /system watchdog set watch-address=$wd; :log info ("MODEM_FW: ping watchdog " . $wd . " restored") }
     :if ($back) do={
       :local after [$fwGet i=$lif]
       :local now [:pick $after 0 [:find $after "|"]]
