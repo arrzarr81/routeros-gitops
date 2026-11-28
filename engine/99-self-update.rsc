@@ -181,7 +181,7 @@ add name=script_SELF_UPDATE owner=admin dont-require-permissions=no policy=ftp,r
     \n      :global logLevel \"critical\"\
     \n      :global logMessage (\"Self-update \" . \$tag . \" broke WAN, rolling back\")\
     \n      :do { /system script run script_LOG_EVENT } on-error={}\
-    \n      :local bks [/file find where name~\"pre-deploy-\"]\
+    \n      :local bks [/file find where name~\"pre-deploy-\" and type=\"backup\"]\
     \n      :local n [:len \$bks]\
     \n      :if (\$n > 0) do={\
     \n        :local f [/file get (\$bks->(\$n - 1)) name]\

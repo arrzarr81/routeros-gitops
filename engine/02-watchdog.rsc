@@ -89,7 +89,7 @@ add name=script_WATCHDOG \
     \n# compare strings with < or > (\"cannot compare if string is less than string\"), numbers it can.\
     \n:local fkey do={ :local d \"\"; :for i from=0 to=([:len \$1] - 1) do={ :local c [:pick \$1 \$i (\$i + 1)]; :if (\$c~\"[0-9]\") do={ :set d (\$d . \$c) } }; :return [:tonum \$d] }\
     \n# Identify the rollback target now, while we still can.\
-    \n:local allBackups [/file find where name~\"pre-deploy-\"]\
+    \n:local allBackups [/file find where name~\"pre-deploy-\" and type=\"backup\"]\
     \n:local backupCount [:len \$allBackups]\
     \n:local latestBackupName \"\"\
     \n:if (\$backupCount = 0) do={\

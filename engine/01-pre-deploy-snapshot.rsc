@@ -69,7 +69,7 @@ add name=script_PRE_DEPLOY_SNAPSHOT \
     \n# compare strings with < or > (\"cannot compare if string is less than string\"), numbers it can.\
     \n:local fkey do={ :local d \"\"; :for i from=0 to=([:len \$1] - 1) do={ :local c [:pick \$1 \$i (\$i + 1)]; :if (\$c~\"[0-9]\") do={ :set d (\$d . \$c) } }; :return [:tonum \$d] }\
     \n# Prune the OLDEST by key (not /file find order) until maxKeep remain.\
-    \n:local allBackups [/file find where name~\"pre-deploy-\"]\
+    \n:local allBackups [/file find where name~\"pre-deploy-\" and type=\"backup\"]\
     \n:local maxKeep 3\
     \n:log info (\"Found \" . [:len \$allBackups] . \" pre-deploy backup(s). Keeping \" . \$maxKeep . \" most recent.\")\
     \n:do {\
@@ -82,7 +82,7 @@ add name=script_PRE_DEPLOY_SNAPSHOT \
     \n    }\
     \n    :log info (\"Pruning old snapshot: \" . [/file get \$oldest name])\
     \n    /file remove \$oldest\
-    \n    :set allBackups [/file find where name~\"pre-deploy-\"]\
+    \n    :set allBackups [/file find where name~\"pre-deploy-\" and type=\"backup\"]\
     \n  }\
     \n} on-error={ :log warning \"Pre-deploy retention failed\" }\
     \n:log info \"Pre-deploy snapshot complete.\""
